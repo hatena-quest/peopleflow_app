@@ -358,6 +358,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const masterStop = document.getElementById('masterStop');
     const openStream = document.getElementById('openStream');
     const openMaster = document.getElementById('openMaster');
+    const openPredict = document.getElementById('openPredict');
     const svcStatus = document.getElementById('svcStatus');
     const streamStatus = document.getElementById('streamStatus');
 
@@ -457,6 +458,15 @@ window.addEventListener('DOMContentLoaded', () => {
         if (!cached) await refreshSvc();
         const host = getBaseHost();
         const port = cached?.u?.master_port ?? 5050;
+        window.open(`http://${host}:${port}/`, '_blank');
+      });
+    }
+
+    if (openPredict) {
+      openPredict.addEventListener('click', async () => {
+        if (!cached) await refreshSvc();
+        const host = getBaseHost();
+        const port = cached?.u?.predict_port ?? 5100;
         window.open(`http://${host}:${port}/`, '_blank');
       });
     }

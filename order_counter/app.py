@@ -1,15 +1,19 @@
 from flask import Flask, jsonify
 import os, signal, subprocess, pathlib
 
-app = Flask(__name__, static_folder="static", static_url_path="")
+BASE_DIR = pathlib.Path(__file__).resolve().parent
+ROOT = BASE_DIR.parent
+STATIC_DIR = BASE_DIR / "static"
 
-ROOT = pathlib.Path(__file__).resolve().parent
+app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
+
 PYTHON = str(ROOT / ".venv" / "bin" / "python") if (ROOT / ".venv" / "bin" / "python").exists() else "python3"
 
 # ==== 起動コマンド（必要なら環境変数で上書きOK）====
 CAMERA_ID = int(os.environ.get("CAMERA_ID", "0"))
 CAMERA_PORT = int(os.environ.get("CAMERA_PORT", "5001"))
 MASTER_PORT = int(os.environ.get("MASTER_PORT", "5050"))
+PREDICT_PORT = int(os.environ.get("PREDICT_PORT", "5100"))
 
 STREAM_CMD = [PYTHON, str(ROOT / "camera_server.py"), str(CAMERA_ID), str(CAMERA_PORT)]
 MASTER_CMD = [PYTHON, str(ROOT / "master_console" / "app.py")]
@@ -138,6 +142,7 @@ def urls():
         "stream_path": f"/stream",
         "stream_port": CAMERA_PORT,
         "master_port": MASTER_PORT,
+        "predict_port": PREDICT_PORT,
         "camera_id": CAMERA_ID
     })
 
