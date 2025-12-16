@@ -10,9 +10,93 @@ window.addEventListener('DOMContentLoaded', () => {
     takosen: { name: 'たこせん', price: 300 },
     topping: { name: 'トッピング', price: 50 },
   };
+  const TAKOYAKI_UNITS_BY_MENU = {
+    four: 4,
+    six: 6,
+    eight: 8,
+    ten: 10,
+    fourteen: 14,
+    takosen: 2,
+    topping: 0,
+  };
+  const TAKOYAKI_UNITS_BY_NAME = {
+    '4': 4,
+    '４': 4,
+    '6': 6,
+    '６': 6,
+    '8': 8,
+    '８': 8,
+    '10': 10,
+    '１０': 10,
+    '14': 14,
+    '１４': 14,
+    four: 4,
+    six: 6,
+    eight: 8,
+    ten: 10,
+    fourteen: 14,
+    takosen: 2,
+    'tako sen': 2,
+    たこせん: 2,
+    タコセン: 2,
+    トッピング: 0,
+    topping: 0,
+  };
+  const normalizeLabel = (value) => {
+    if (value === null || value === undefined) return '';
+    return value.toString().trim().toLowerCase();
+  };
+  const extractDigits = (value) => {
+    if (value === null || value === undefined) return '';
+    return value
+      .toString()
+      .normalize('NFKC')
+      .replace(/[^\d]/g, '');
+  };
+  const takoyakiUnitsForItem = (item) => {
+    if (!item) return null;
+    const menuKey = normalizeLabel(item.menuId ?? item.menu_id);
+    if (menuKey && Object.prototype.hasOwnProperty.call(TAKOYAKI_UNITS_BY_MENU, menuKey)) {
+      return TAKOYAKI_UNITS_BY_MENU[menuKey];
+    }
+    const nameKey = normalizeLabel(item.name ?? '');
+    if (nameKey && Object.prototype.hasOwnProperty.call(TAKOYAKI_UNITS_BY_NAME, nameKey)) {
+      return TAKOYAKI_UNITS_BY_NAME[nameKey];
+    }
+    const digits = extractDigits(item.name ?? '');
+    if (digits) {
+      const numeric = Number(digits);
+      if (!Number.isNaN(numeric)) {
+        return numeric;
+      }
+    }
+    return null;
+  };
+  const computeTakoyakiUnits = (items) => {
+    if (!Array.isArray(items) || items.length === 0) return null;
+    let total = 0;
+    let matched = false;
+    items.forEach((item) => {
+      const perItem = takoyakiUnitsForItem(item);
+      if (perItem === null || perItem === undefined) return;
+      const quantity = Number(item?.quantity) || 0;
+      if (quantity <= 0) return;
+      total += perItem * quantity;
+      matched = true;
+    });
+    return matched ? total : null;
+  };
+  const fallbackQuantityUnits = (items) => {
+    if (!Array.isArray(items) || items.length === 0) return 0;
+    return items.reduce((sum, item) => {
+      const quantity = Number(item?.quantity) || 0;
+      return quantity > 0 ? sum + quantity : sum;
+    }, 0);
+  };
 
   const menuContainer = document.getElementById('menuContainer');
   const todayLabel = document.getElementById('todayLabel');
+  const orderSyncStatus = document.getElementById('orderSyncStatus');
   const exportButton = document.getElementById('exportButton');
   const resetButton = document.getElementById('resetButton');
   const historyList = document.getElementById('historyList');
@@ -20,10 +104,38 @@ window.addEventListener('DOMContentLoaded', () => {
   const cartTotalEl = document.getElementById('cartTotal');
   const checkoutButton = document.getElementById('checkoutButton');
   const clearCartButton = document.getElementById('clearCartButton');
+  let syncedIds = new Set();
 
-  const getTodayString = () => new Date().toISOString().slice(0, 10);
+  const pad = (value, length = 2) => String(value).padStart(length, '0');
+
+  const getLocalDateString = (date = new Date()) => {
+    const year = date.getFullYear();
+    const month = pad(date.getMonth() + 1);
+    const day = pad(date.getDate());
+    return `${year}-${month}-${day}`;
+  };
+
+  const getLocalDateTimeString = (date = new Date()) => {
+    const hours = pad(date.getHours());
+    const minutes = pad(date.getMinutes());
+    const seconds = pad(date.getSeconds());
+    const milliseconds = pad(date.getMilliseconds(), 3);
+    return `${getLocalDateString(date)}T${hours}:${minutes}:${seconds}.${milliseconds}`;
+  };
+
+  const getTodayString = () => getLocalDateString();
+  const getTodayUtcString = () => new Date().toISOString().slice(0, 10);
   const ordersStorageKey = () => `orders_${getTodayString()}`;
   const cartStorageKey = () => `cart_${getTodayString()}`;
+
+  const normalizeTimeString = (value) => {
+    if (!value) return getLocalDateTimeString();
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return getLocalDateTimeString();
+    }
+    return getLocalDateTimeString(date);
+  };
   const createId = () => {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
       return crypto.randomUUID();
@@ -56,7 +168,7 @@ window.addEventListener('DOMContentLoaded', () => {
           : items.reduce((sum, item) => sum + item.price * item.quantity, 0);
       return {
         id: entry.id || createId(),
-        time: entry.time || new Date().toISOString(),
+        time: normalizeTimeString(entry.time),
         items,
         total,
       };
@@ -65,7 +177,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const price = Number(entry?.price) || 0;
     return {
       id: entry?.id || `legacy_${index}_${Date.now()}`,
-      time: entry?.time || new Date().toISOString(),
+      time: normalizeTimeString(entry?.time),
       items: [
         {
           menuId: entry?.menuId ?? null,
@@ -86,6 +198,52 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const saveCheckouts = (checkouts) => {
     localStorage.setItem(ordersStorageKey(), JSON.stringify(checkouts));
+  };
+
+  const syncStateStorageKey = () => `orders_synced_${getTodayString()}`;
+
+  const loadSyncedIdsFromStorage = () => {
+    const raw = localStorage.getItem(syncStateStorageKey());
+    if (!raw) return new Set();
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return new Set(parsed.filter((id) => typeof id === 'string'));
+      }
+    } catch (err) {
+      console.warn('同期状態の読み込みに失敗しました', err);
+    }
+    return new Set();
+  };
+
+  const persistSyncedIds = () => {
+    if (!syncedIds || syncedIds.size === 0) {
+      localStorage.removeItem(syncStateStorageKey());
+      return;
+    }
+    localStorage.setItem(syncStateStorageKey(), JSON.stringify([...syncedIds]));
+  };
+
+  const countPendingCheckouts = (checkouts) => {
+    const data = Array.isArray(checkouts) ? checkouts : loadCheckouts();
+    return data.reduce((count, entry) => (syncedIds.has(entry.id) ? count : count + 1), 0);
+  };
+
+  const updateSyncStatus = ({ message = null, error = false, checkouts = null } = {}) => {
+    if (!orderSyncStatus) return;
+    if (message) {
+      orderSyncStatus.textContent = message;
+      orderSyncStatus.classList.toggle('error', Boolean(error));
+      return;
+    }
+    const pending = countPendingCheckouts(checkouts);
+    if (pending === 0) {
+      orderSyncStatus.textContent = 'データ連携: 最新';
+      orderSyncStatus.classList.remove('error');
+    } else {
+      orderSyncStatus.textContent = `データ連携: 未送信 ${pending}件`;
+      orderSyncStatus.classList.add('error');
+    }
   };
 
   const loadCart = () => {
@@ -184,6 +342,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const data = checkouts ?? loadCheckouts();
     renderHistory(data);
     renderDailyTotal(data);
+    updateSyncStatus({ checkouts: data });
     return data;
   };
 
@@ -201,7 +360,7 @@ window.addEventListener('DOMContentLoaded', () => {
       menuId,
       name: menu.name,
       price: menu.price,
-      addedAt: new Date().toISOString(),
+      addedAt: getLocalDateTimeString(),
     });
     saveCart(cart);
     renderCartSummary(cart);
@@ -215,6 +374,64 @@ window.addEventListener('DOMContentLoaded', () => {
     renderCartSummary([]);
   };
 
+  const syncCheckoutToServer = async (checkoutEntry, { silent = false } = {}) => {
+    if (!checkoutEntry || syncedIds.has(checkoutEntry.id)) {
+      updateSyncStatus();
+      return;
+    }
+    const derivedUnits =
+      checkoutEntry.orderUnits ??
+      computeTakoyakiUnits(checkoutEntry.items);
+    const payloadOrderCount =
+      derivedUnits ??
+      fallbackQuantityUnits(checkoutEntry.items) ??
+      0;
+    const payload = {
+      id: checkoutEntry.id,
+      time: checkoutEntry.time,
+      order_count: payloadOrderCount,
+      items: checkoutEntry.items,
+      total: checkoutEntry.total,
+    };
+    try {
+      updateSyncStatus({ message: 'データ送信中...' });
+      const response = await fetch('/api/orders/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok || !result?.ok || !result.timestamp) {
+        throw new Error(result?.error || '注文ログ送信エラー');
+      }
+      console.log(`[orders] logged at ${result.timestamp} (${result.order_count})`, result);
+      syncedIds.add(checkoutEntry.id);
+      persistSyncedIds();
+      updateSyncStatus();
+    } catch (err) {
+      console.warn('注文データの送信に失敗しました。ネットワーク状態を確認してください。', err);
+      updateSyncStatus({ message: 'データ連携エラー', error: true });
+      if (!silent) {
+        alert('注文データをサーバーに送信できませんでした。ネットワークやサーバーの状態を確認してください。');
+      }
+      throw err;
+    }
+  };
+
+  const syncPendingCheckouts = async () => {
+    const checkouts = loadCheckouts();
+    for (const entry of checkouts) {
+      if (!syncedIds.has(entry.id)) {
+        try {
+          await syncCheckoutToServer(entry, { silent: true });
+        } catch (err) {
+          break;
+        }
+      }
+    }
+    updateSyncStatus({ checkouts });
+  };
+
   const checkoutCart = () => {
     const cart = loadCart();
     if (cart.length === 0) {
@@ -223,17 +440,25 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     const items = aggregateCartItems(cart).map(({ key, ...rest }) => rest);
     const total = cart.reduce((sum, item) => sum + item.price, 0);
+    const takoyakiUnits =
+      computeTakoyakiUnits(items) ??
+      fallbackQuantityUnits(items) ??
+      0;
+    const orderUnits = takoyakiUnits;
     const checkouts = loadCheckouts();
-    checkouts.push({
+    const checkoutEntry = {
       id: createId(),
-      time: new Date().toISOString(),
+      time: getLocalDateTimeString(),
       items,
       total,
-    });
+      orderUnits,
+    };
+    checkouts.push(checkoutEntry);
     saveCheckouts(checkouts);
     saveCart([]);
     refreshCheckouts(checkouts);
     renderCartSummary([]);
+    syncCheckoutToServer(checkoutEntry).catch(() => {});
   };
 
   const exportToday = () => {
@@ -271,8 +496,11 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!ok) return;
     localStorage.removeItem(ordersStorageKey());
     localStorage.removeItem(cartStorageKey());
+    localStorage.removeItem(syncStateStorageKey());
+    syncedIds = new Set();
     refreshCheckouts([]);
     renderCartSummary([]);
+    updateSyncStatus({ checkouts: [] });
   };
 
   const setupMenuButtons = () => {
@@ -288,10 +516,38 @@ window.addEventListener('DOMContentLoaded', () => {
   };
 
   const init = () => {
+    // 以前の実装(UTC日付キー)で保存したデータがある場合、今日(ローカル日付キー)へ移行
+    const migrateStorageIfNeeded = () => {
+      const local = getTodayString();
+      const utc = getTodayUtcString();
+      if (local === utc) return;
+
+      const localOrdersKey = `orders_${local}`;
+      const utcOrdersKey = `orders_${utc}`;
+      if (!localStorage.getItem(localOrdersKey) && localStorage.getItem(utcOrdersKey)) {
+        localStorage.setItem(localOrdersKey, localStorage.getItem(utcOrdersKey));
+      }
+
+      const localCartKey = `cart_${local}`;
+      const utcCartKey = `cart_${utc}`;
+      if (!localStorage.getItem(localCartKey) && localStorage.getItem(utcCartKey)) {
+        localStorage.setItem(localCartKey, localStorage.getItem(utcCartKey));
+      }
+
+      const localSyncKey = `orders_synced_${local}`;
+      const utcSyncKey = `orders_synced_${utc}`;
+      if (!localStorage.getItem(localSyncKey) && localStorage.getItem(utcSyncKey)) {
+        localStorage.setItem(localSyncKey, localStorage.getItem(utcSyncKey));
+      }
+    };
+
+    migrateStorageIfNeeded();
+    syncedIds = loadSyncedIdsFromStorage();
     renderTodayLabel();
     setupMenuButtons();
     refreshCart();
     refreshCheckouts();
+    syncPendingCheckouts().catch(() => {});
     if (exportButton) {
       exportButton.addEventListener('click', exportToday);
     }
@@ -311,6 +567,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const masterStop = document.getElementById('masterStop');
     const openStream = document.getElementById('openStream');
     const openMaster = document.getElementById('openMaster');
+    const openPredict = document.getElementById('openPredict');
     const svcStatus = document.getElementById('svcStatus');
     const streamStatus = document.getElementById('streamStatus');
 
@@ -410,6 +667,15 @@ window.addEventListener('DOMContentLoaded', () => {
         if (!cached) await refreshSvc();
         const host = getBaseHost();
         const port = cached?.u?.master_port ?? 5050;
+        window.open(`http://${host}:${port}/`, '_blank');
+      });
+    }
+
+    if (openPredict) {
+      openPredict.addEventListener('click', async () => {
+        if (!cached) await refreshSvc();
+        const host = getBaseHost();
+        const port = cached?.u?.predict_port ?? 5100;
         window.open(`http://${host}:${port}/`, '_blank');
       });
     }

@@ -33,6 +33,20 @@
         text-align: center;
         margin-bottom: 16px;
       }
+      .sync-status {
+        text-align: center;
+        font-size: 0.85rem;
+        margin-bottom: 16px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        display: inline-block;
+        background: #e5f5f2;
+        color: #0f766e;
+      }
+      .sync-status.error {
+        background: #fee2e2;
+        color: #b91c1c;
+      }
 
       .menu-grid {
         display: grid;
@@ -238,6 +252,7 @@
   <body>
     <h1>日次注文カウンター</h1>
     <div id="todayLabel" class="storage-label"></div>
+    <div id="orderSyncStatus" class="sync-status">データ連携: 未送信</div>
 
     <div class="cart-box">
       <div class="cart-title">
@@ -270,6 +285,7 @@
 
         <button id="openStream" class="action-button">📺 配信を開く</button>
         <button id="openMaster" class="action-button">🧠 コンソールを開く</button>
+        <button id="openPredict" class="action-button">📈 予測ダッシュボード</button>
 
         <div id="svcStatus" class="cart-hint">状態: 不明</div>
       </div>

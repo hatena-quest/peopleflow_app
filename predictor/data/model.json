@@ -1,0 +1,83 @@
+{
+  "intercept": -4.927197759278314,
+  "coefficients": [
+    0.19643929156924253,
+    -0.026822657599040057,
+    -0.2152037047582348,
+    -0.1218832056949164,
+    0.2967351606706548,
+    0.15246012999599107,
+    -0.1505082349355369,
+    -0.05610013104325967
+  ],
+  "feature_names": [
+    "cam1_left",
+    "cam1_right",
+    "cam2_left",
+    "cam2_right",
+    "cam3_left",
+    "cam3_right",
+    "cam4_left",
+    "cam4_right"
+  ],
+  "r2": 0.48173611532748295,
+  "rmse": 0.23194615575636832,
+  "trained_samples": 17,
+  "trained_at": "2025-12-16T15:56:56.572121+00:00",
+  "results": [
+    {
+      "feature": "intercept",
+      "coefficient": -4.927197759278314,
+      "t_statistic": -0.5403013255014785,
+      "p_value": 0.5889892444257868
+    },
+    {
+      "feature": "cam1_left",
+      "coefficient": 0.19643929156924253,
+      "t_statistic": 0.7682899412393921,
+      "p_value": 0.44231494924778647
+    },
+    {
+      "feature": "cam1_right",
+      "coefficient": -0.026822657599040057,
+      "t_statistic": -0.4146013328688052,
+      "p_value": 0.67843377229441
+    },
+    {
+      "feature": "cam2_left",
+      "coefficient": -0.2152037047582348,
+      "t_statistic": -0.6239424726713477,
+      "p_value": 0.5326653657805311
+    },
+    {
+      "feature": "cam2_right",
+      "coefficient": -0.1218832056949164,
+      "t_statistic": -0.7115611807151007,
+      "p_value": 0.4767365526511194
+    },
+    {
+      "feature": "cam3_left",
+      "coefficient": 0.2967351606706548,
+      "t_statistic": 0.7345282632290109,
+      "p_value": 0.46262684114296787
+    },
+    {
+      "feature": "cam3_right",
+      "coefficient": 0.15246012999599107,
+      "t_statistic": 0.7293179503933344,
+      "p_value": 0.4658071944842679
+    },
+    {
+      "feature": "cam4_left",
+      "coefficient": -0.1505082349355369,
+      "t_statistic": -0.6573218233531806,
+      "p_value": 0.5109740070215743
+    },
+    {
+      "feature": "cam4_right",
+      "coefficient": -0.05610013104325967,
+      "t_statistic": -0.323220709927343,
+      "p_value": 0.746528097717639
+    }
+  ]
+}
