@@ -565,7 +565,6 @@ window.addEventListener('DOMContentLoaded', () => {
     const streamStop = document.getElementById('streamStop');
     const masterStart = document.getElementById('masterStart');
     const masterStop = document.getElementById('masterStop');
-    const openStream = document.getElementById('openStream');
     const openMaster = document.getElementById('openMaster');
     const openPredict = document.getElementById('openPredict');
     const svcStatus = document.getElementById('svcStatus');
@@ -650,15 +649,6 @@ window.addEventListener('DOMContentLoaded', () => {
           masterStop.disabled = false;
           refreshSvc();
         }
-      });
-    }
-
-    if (openStream) {
-      openStream.addEventListener('click', async () => {
-        if (!cached) await refreshSvc();
-        const host = getBaseHost();
-        const port = cached?.u?.stream_port ?? 5001;
-        window.open(`http://${host}:${port}/stream`, '_blank');
       });
     }
 
