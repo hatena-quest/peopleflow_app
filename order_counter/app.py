@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request
-import json, os, signal, subprocess, pathlib, threading
+import json, os, signal, subprocess, pathlib, threading, unicodedata
 from datetime import datetime
+from typing import Optional
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 ROOT = BASE_DIR.parent
@@ -15,6 +16,42 @@ CAMERA_ID = int(os.environ.get("CAMERA_ID", "0"))
 CAMERA_PORT = int(os.environ.get("CAMERA_PORT", "5001"))
 MASTER_PORT = int(os.environ.get("MASTER_PORT", "5050"))
 PREDICT_PORT = int(os.environ.get("PREDICT_PORT", "5100"))
+TAKOYAKI_UNIT_PRICE = int(os.environ.get("TAKOYAKI_UNIT_PRICE", "50"))
+
+
+def _normalize_text(value: str | None) -> str:
+    if not value:
+        return ""
+    return unicodedata.normalize("NFKC", str(value)).strip().lower()
+
+
+TAKOYAKI_MENU_COUNTS = {
+    "four": 4,
+    "six": 6,
+    "eight": 8,
+    "ten": 10,
+    "fourteen": 14,
+    "takosen": 2,
+    "topping": 0,
+}
+TAKOYAKI_NAME_COUNTS = {
+    _normalize_text("4"): 4,
+    _normalize_text("6"): 6,
+    _normalize_text("8"): 8,
+    _normalize_text("10"): 10,
+    _normalize_text("14"): 14,
+    _normalize_text("four"): 4,
+    _normalize_text("six"): 6,
+    _normalize_text("eight"): 8,
+    _normalize_text("ten"): 10,
+    _normalize_text("fourteen"): 14,
+    _normalize_text("たこせん"): 2,
+    _normalize_text("タコセン"): 2,
+    _normalize_text("takosen"): 2,
+    _normalize_text("tako sen"): 2,
+    _normalize_text("トッピング"): 0,
+    _normalize_text("topping"): 0,
+}
 
 STREAM_CMD = [PYTHON, str(ROOT / "camera_server.py"), str(CAMERA_ID), str(CAMERA_PORT)]
 MASTER_CMD = [PYTHON, str(ROOT / "master_console" / "app.py")]
@@ -105,9 +142,101 @@ def _load_existing_orders():
     _orders_loaded = True
 
 
-def _record_order_count(order_id: str | None, order_count: int, event_time: datetime) -> tuple[str, bool]:
-    if order_count <= 0:
-        order_count = 1
+def _price_to_takoyaki_count(total_price: Optional[float]) -> Optional[int]:
+    if total_price is None or total_price <= 0:
+        return None
+    return max(1, int(round(total_price / TAKOYAKI_UNIT_PRICE)))
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _lookup_item_units(item: dict) -> Optional[int]:
+    if not isinstance(item, dict):
+        return None
+    menu_id = item.get("menuId") or item.get("menu_id")
+    if isinstance(menu_id, str):
+        menu_key = _normalize_text(menu_id)
+        if menu_key in TAKOYAKI_MENU_COUNTS:
+            return TAKOYAKI_MENU_COUNTS[menu_key]
+    name = item.get("name")
+    if isinstance(name, str):
+        normalized = _normalize_text(name)
+        if normalized in TAKOYAKI_NAME_COUNTS:
+            return TAKOYAKI_NAME_COUNTS[normalized]
+        digits = "".join(ch for ch in unicodedata.normalize("NFKC", name) if ch.isdigit())
+        if digits:
+            try:
+                return int(digits)
+            except ValueError:
+                pass
+    return None
+
+
+def _takoyaki_units_from_items(items) -> Optional[int]:
+    if not isinstance(items, list) or not items:
+        return None
+    total = 0
+    matched = False
+    for item in items:
+        units = _lookup_item_units(item)
+        if units is None:
+            continue
+        qty = max(0, _safe_int(item.get("quantity"), default=1))
+        total += units * qty
+        matched = True
+    return total if matched else None
+
+
+def _fallback_quantity_total(items) -> Optional[int]:
+    if not isinstance(items, list) or not items:
+        return None
+    subtotal = 0
+    for item in items:
+        subtotal += max(0, _safe_int(item.get("quantity"), default=1))
+    return subtotal
+
+
+def _extract_total_price(payload: dict) -> Optional[float]:
+    for key in ("total", "total_price", "amount", "price"):
+        raw = payload.get(key)
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    items = payload.get("items")
+    if isinstance(items, list):
+        subtotal = 0.0
+        has_value = False
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                price_value = float(item.get("price", 0))
+                qty_value = int(item.get("quantity", 1))
+            except (TypeError, ValueError):
+                continue
+            if price_value <= 0 or qty_value <= 0:
+                continue
+            subtotal += price_value * qty_value
+            has_value = True
+        if has_value:
+            return subtotal
+    return None
+
+
+def _record_order_count(
+    order_id: str | None, order_count: int, event_time: datetime, total_price: Optional[float] = None
+) -> tuple[str, bool]:
+    order_count = max(0, int(order_count))
     event_time = event_time.replace(microsecond=0)
     event_ts = event_time.strftime("%Y-%m-%dT%H:%M:%S")
     with _order_lock:
@@ -121,6 +250,10 @@ def _record_order_count(order_id: str | None, order_count: int, event_time: date
             "order_occurred": True,
             "order_count": order_count,
         }
+        if total_price is not None:
+            payload["total_price"] = round(float(total_price), 2)
+            payload["unit_price_for_count"] = TAKOYAKI_UNIT_PRICE
+        payload["takoyaki_count"] = order_count
         if order_id:
             payload["order_id"] = order_id
         ORDERS_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -215,21 +348,30 @@ def record_order():
     else:
         event_time = datetime.now()
 
+    items = payload.get("items")
+    total_price = _extract_total_price(payload)
+    takoyaki_units = _takoyaki_units_from_items(items)
+    price_based_count = _price_to_takoyaki_count(total_price)
+
     reported_count = payload.get("order_count")
+    order_count: Optional[int]
     try:
         order_count = int(reported_count)
     except (TypeError, ValueError):
-        items = payload.get("items") or []
-        if isinstance(items, list):
-            quantities = [
-                int(item.get("quantity", 1)) for item in items if isinstance(item, dict)
-            ]
-            order_count = sum(q for q in quantities if q > 0) or 1
-        else:
-            order_count = 1
+        order_count = None
+
+    if takoyaki_units is not None:
+        order_count = takoyaki_units
+    elif order_count is not None:
+        order_count = max(0, order_count)
+    elif price_based_count is not None:
+        order_count = price_based_count
+    else:
+        fallback_qty = _fallback_quantity_total(items)
+        order_count = fallback_qty if fallback_qty is not None else 0
 
     order_id = payload.get("id") or payload.get("order_id")
-    event_ts, created = _record_order_count(order_id, order_count, event_time)
+    event_ts, created = _record_order_count(order_id, order_count, event_time, total_price=total_price)
     return jsonify({
         "ok": True,
         "timestamp": event_ts,

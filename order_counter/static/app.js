@@ -10,6 +10,89 @@ window.addEventListener('DOMContentLoaded', () => {
     takosen: { name: 'たこせん', price: 300 },
     topping: { name: 'トッピング', price: 50 },
   };
+  const TAKOYAKI_UNITS_BY_MENU = {
+    four: 4,
+    six: 6,
+    eight: 8,
+    ten: 10,
+    fourteen: 14,
+    takosen: 2,
+    topping: 0,
+  };
+  const TAKOYAKI_UNITS_BY_NAME = {
+    '4': 4,
+    '４': 4,
+    '6': 6,
+    '６': 6,
+    '8': 8,
+    '８': 8,
+    '10': 10,
+    '１０': 10,
+    '14': 14,
+    '１４': 14,
+    four: 4,
+    six: 6,
+    eight: 8,
+    ten: 10,
+    fourteen: 14,
+    takosen: 2,
+    'tako sen': 2,
+    たこせん: 2,
+    タコセン: 2,
+    トッピング: 0,
+    topping: 0,
+  };
+  const normalizeLabel = (value) => {
+    if (value === null || value === undefined) return '';
+    return value.toString().trim().toLowerCase();
+  };
+  const extractDigits = (value) => {
+    if (value === null || value === undefined) return '';
+    return value
+      .toString()
+      .normalize('NFKC')
+      .replace(/[^\d]/g, '');
+  };
+  const takoyakiUnitsForItem = (item) => {
+    if (!item) return null;
+    const menuKey = normalizeLabel(item.menuId ?? item.menu_id);
+    if (menuKey && Object.prototype.hasOwnProperty.call(TAKOYAKI_UNITS_BY_MENU, menuKey)) {
+      return TAKOYAKI_UNITS_BY_MENU[menuKey];
+    }
+    const nameKey = normalizeLabel(item.name ?? '');
+    if (nameKey && Object.prototype.hasOwnProperty.call(TAKOYAKI_UNITS_BY_NAME, nameKey)) {
+      return TAKOYAKI_UNITS_BY_NAME[nameKey];
+    }
+    const digits = extractDigits(item.name ?? '');
+    if (digits) {
+      const numeric = Number(digits);
+      if (!Number.isNaN(numeric)) {
+        return numeric;
+      }
+    }
+    return null;
+  };
+  const computeTakoyakiUnits = (items) => {
+    if (!Array.isArray(items) || items.length === 0) return null;
+    let total = 0;
+    let matched = false;
+    items.forEach((item) => {
+      const perItem = takoyakiUnitsForItem(item);
+      if (perItem === null || perItem === undefined) return;
+      const quantity = Number(item?.quantity) || 0;
+      if (quantity <= 0) return;
+      total += perItem * quantity;
+      matched = true;
+    });
+    return matched ? total : null;
+  };
+  const fallbackQuantityUnits = (items) => {
+    if (!Array.isArray(items) || items.length === 0) return 0;
+    return items.reduce((sum, item) => {
+      const quantity = Number(item?.quantity) || 0;
+      return quantity > 0 ? sum + quantity : sum;
+    }, 0);
+  };
 
   const menuContainer = document.getElementById('menuContainer');
   const todayLabel = document.getElementById('todayLabel');
@@ -296,10 +379,17 @@ window.addEventListener('DOMContentLoaded', () => {
       updateSyncStatus();
       return;
     }
+    const derivedUnits =
+      checkoutEntry.orderUnits ??
+      computeTakoyakiUnits(checkoutEntry.items);
+    const payloadOrderCount =
+      derivedUnits ??
+      fallbackQuantityUnits(checkoutEntry.items) ??
+      0;
     const payload = {
       id: checkoutEntry.id,
       time: checkoutEntry.time,
-      order_count: checkoutEntry.orderUnits || checkoutEntry.items?.length || 1,
+      order_count: payloadOrderCount,
       items: checkoutEntry.items,
       total: checkoutEntry.total,
     };
@@ -350,10 +440,11 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     const items = aggregateCartItems(cart).map(({ key, ...rest }) => rest);
     const total = cart.reduce((sum, item) => sum + item.price, 0);
-    const orderUnits = Math.max(
-      1,
-      items.reduce((sum, item) => sum + (item.quantity || 0), 0)
-    );
+    const takoyakiUnits =
+      computeTakoyakiUnits(items) ??
+      fallbackQuantityUnits(items) ??
+      0;
+    const orderUnits = takoyakiUnits;
     const checkouts = loadCheckouts();
     const checkoutEntry = {
       id: createId(),

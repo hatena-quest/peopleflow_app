@@ -254,13 +254,19 @@ with open(detections_path, 'r', encoding='utf-8') as f:
 {
   "timestamp": "YYYY-MM-DDTHH:MM:SS",
   "order_occurred": true,
-  "order_count": 2
+  "order_count": 8,
+  "takoyaki_count": 8,
+  "total_price": 550
 }
 ```
 
 **データ生成の仕様**:
 - 注文が発生した時点で記録
-- `order_count` は 1 以上の整数
+- `order_count`/`takoyaki_count` は販売されたたこ焼き総個数  
+  - 4/6/8/10/14個入りはそのまま個数として加算  
+  - たこせんは 2 個、トッピングは 0 個として換算  
+  - 上記に当てはまらない場合は `items` 情報や、必要に応じて `total_price`（50円→1個換算。`TAKOYAKI_UNIT_PRICE` で変更可能）から推定する
+- `total_price` は分析用に保存（未指定なら `items` の単価×数量から算出）
 
 ### 3. 学習済みモデル (`predictor/data/model.json`)
 
