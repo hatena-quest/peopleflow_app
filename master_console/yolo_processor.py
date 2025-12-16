@@ -4,12 +4,17 @@ YOLO処理モジュール
 """
 import cv2
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import queue
 import threading
 import json
 import os
 import config
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
 
 try:
     from ultralytics import YOLO
@@ -18,6 +23,45 @@ except ImportError:
     YOLO_AVAILABLE = False
     print("警告: ultralyticsがインストールされていません。YOLO機能は使用できません。")
     print("インストール: pip install ultralytics")
+
+
+def _resolve_local_timezone():
+    tz_name = os.environ.get("APP_TIMEZONE", "Asia/Tokyo")
+    if ZoneInfo:
+        try:
+            return ZoneInfo(tz_name)
+        except Exception:
+            pass
+    offset_hours = int(os.environ.get("APP_TIMEZONE_OFFSET", "9"))
+    return timezone(timedelta(hours=offset_hours))
+
+
+LOCAL_TZ = _resolve_local_timezone()
+
+
+def now_local():
+    return datetime.now(LOCAL_TZ)
+
+
+def format_local_iso(dt=None):
+    dt = dt or now_local()
+    if dt.tzinfo:
+        dt = dt.astimezone(LOCAL_TZ)
+    else:
+        dt = dt.replace(tzinfo=LOCAL_TZ)
+    return dt.replace(tzinfo=None).isoformat()
+
+
+def parse_to_local_datetime(timestamp_str):
+    if not timestamp_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(timestamp_str)
+    except ValueError:
+        return None
+    if dt.tzinfo:
+        return dt.astimezone(LOCAL_TZ)
+    return dt.replace(tzinfo=LOCAL_TZ)
 
 class YOLOProcessor:
     """
@@ -294,7 +338,7 @@ class YOLOProcessor:
             detections: 検出結果（各detectionにcamera_idが含まれる）
             camera_id_param: パラメータとして渡されたカメラID（統合フレームの場合はNone）
         """
-        timestamp = datetime.now().isoformat()
+        timestamp = format_local_iso()
         jsonl_file = os.path.join(self.data_dir, "detections.jsonl")
         
         for detection in detections:
@@ -365,12 +409,11 @@ class YOLOProcessor:
         1分ごとの集計処理を実行するワーカースレッド
         """
         import time
-        from datetime import datetime, timedelta
         
         while self.aggregation_running:
             try:
                 # 現在時刻を取得
-                now = datetime.now()
+                now = now_local()
                 # 1分前の時刻を計算（分単位で切り捨て）
                 minute_start = now.replace(second=0, microsecond=0)
                 
@@ -390,7 +433,7 @@ class YOLOProcessor:
                 
                 # 次の分の開始時刻まで待機
                 next_minute = minute_start + timedelta(minutes=1)
-                sleep_seconds = (next_minute - datetime.now()).total_seconds()
+                sleep_seconds = (next_minute - now_local()).total_seconds()
                 if sleep_seconds > 0:
                     time.sleep(sleep_seconds)
                 else:
@@ -426,19 +469,8 @@ class YOLOProcessor:
                     try:
                         data = json.loads(line.strip())
                         timestamp_str = data.get('timestamp', '')
-                        if not timestamp_str:
-                            continue
-                        
-                        # タイムスタンプをパース（ISO形式）
-                        try:
-                            # タイムゾーン情報がある場合は削除
-                            if 'T' in timestamp_str:
-                                if '+' in timestamp_str or timestamp_str.endswith('Z'):
-                                    # タイムゾーン情報を削除
-                                    timestamp_str = timestamp_str.split('+')[0].split('Z')[0]
-                            detection_time = datetime.fromisoformat(timestamp_str)
-                        except ValueError:
-                            # パースに失敗した場合はスキップ
+                        detection_time = parse_to_local_datetime(timestamp_str)
+                        if detection_time is None:
                             continue
                         
                         # 集計期間内かチェック
@@ -470,7 +502,7 @@ class YOLOProcessor:
                 
                 if total_count > 0:  # データがある場合のみ保存
                     aggregated_result = {
-                        'timestamp': start_time.isoformat(),
+                        'timestamp': format_local_iso(start_time),
                         'camera_id': camera_id,
                         'right_count': right_count,
                         'left_count': left_count,
@@ -495,15 +527,13 @@ class YOLOProcessor:
         """
         30分より古いデータを削除
         """
-        from datetime import datetime, timedelta
-        
         jsonl_file = os.path.join(self.data_dir, "detections.jsonl")
         
         if not os.path.exists(jsonl_file):
             return
         
         # 30分前の時刻を計算
-        cutoff_time = datetime.now() - timedelta(minutes=30)
+        cutoff_time = now_local() - timedelta(minutes=30)
         
         try:
             # ファイルを読み込んで、30分以内のデータのみを保持
@@ -521,19 +551,8 @@ class YOLOProcessor:
                     try:
                         data = json.loads(line)
                         timestamp_str = data.get('timestamp', '')
-                        if not timestamp_str:
-                            # タイムスタンプがない場合は保持（念のため）
-                            kept_lines.append(line)
-                            continue
-                        
-                        # タイムスタンプをパース
-                        try:
-                            if 'T' in timestamp_str:
-                                if '+' in timestamp_str or timestamp_str.endswith('Z'):
-                                    timestamp_str = timestamp_str.split('+')[0].split('Z')[0]
-                            detection_time = datetime.fromisoformat(timestamp_str)
-                        except ValueError:
-                            # パースに失敗した場合は保持（念のため）
+                        detection_time = parse_to_local_datetime(timestamp_str)
+                        if detection_time is None:
                             kept_lines.append(line)
                             continue
                         
@@ -562,4 +581,3 @@ class YOLOProcessor:
             print(f"[クリーンアップ] エラー: {e}")
             import traceback
             traceback.print_exc()
-
