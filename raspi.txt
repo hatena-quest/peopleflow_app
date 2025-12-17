@@ -1,0 +1,203 @@
+了解です。**明日そのまま再開できる引き継ぎメモ**をまとめます。
+（AnkerWork 310 は切り捨て前提で整理しています）
+
+---
+
+# 📌 遠隔ライブカメラ構築 引き継ぎまとめ（2025-12-16 時点）
+
+## 目的（再確認）
+
+* Raspberry Pi Zero 2 W + USBカメラ
+* Flask + OpenCV で **MJPEG配信**
+* 母艦（Windows PC）でストリーム取得し **YOLO解析**
+* 将来 **複数台（4台）運用**
+
+---
+
+## 構成
+
+* **camera001**
+  IP: `192.168.10.106`
+  ポート: `5001`
+* **camera002**
+  IP: `192.168.10.107`
+  ポート: `5002`
+* OS: Raspberry Pi OS
+* 起動方式: `systemd` サービス
+
+---
+
+## camera002（結論：完全に正常）
+
+### 状態
+
+* `camera_server.service`
+
+  ```ini
+  ExecStart=/usr/bin/python3 /home/pi/camera_server.py 0 5002
+  Restart=always
+  User=pi
+  ```
+* `systemctl status`
+  → **active (running)** を数分以上維持
+* PC から
+
+  * `/`
+  * `/info`
+  * `/stream`
+    → **すべて 200 OK**
+* MJPEG ストリーム表示 **成功**
+
+### 判定
+
+✅ **ハード・ネットワーク・コードすべて問題なし**
+camera002 は完成状態。
+
+---
+
+## camera001（問題点と切り分け結果）
+
+### 表面上の症状
+
+* `/info` は取得できる
+* `/stream` は **ブラウザでぐるぐるして映らない**
+
+### Pi 側確認結果
+
+* `camera_server.py` は起動中
+
+  ```bash
+  ps aux | grep camera_server.py
+  ```
+* `/dev/video*` は多数存在
+* `journalctl` 上もエラーなし（GET /info は通る）
+
+### 重要な発見
+
+#### USBカメラが **認識されていない**
+
+```bash
+lsusb
+```
+
+→ **USBカメラが表示されない**
+
+```bash
+v4l2-ctl --list-devices
+```
+
+→ **bcm2835 系のみ（USBカメラなし）**
+
+```bash
+ffmpeg -f v4l2 -i /dev/videoX ...
+```
+
+→ **すべて失敗**
+
+### 使用していたカメラ
+
+* **AnkerWork 310**
+
+  * 👉 Raspberry Pi Zero 2 W では **非対応 or 不安定**
+  * UVCとして認識されない可能性が高い
+
+### 判定
+
+❌ **camera001 の問題はソフトではなく USBカメラ**
+
+* Flask / OpenCV / systemd / ネットワークは正常
+* カメラ入力が無いため `/stream` が詰まっている
+
+---
+
+## 現時点での全体 STEP 位置
+
+### 全体STEP
+
+A. Pi 単体で手動起動確認
+B. systemd による常駐化
+C. 複数台接続確認
+D. 障害切り分け
+E. PC側取得 & YOLO
+F. 4台展開設計
+
+### 現在地
+
+* **camera002**：C 完了
+* **camera001**：D（原因特定完了）
+
+---
+
+## 今日やったことの結論（超重要）
+
+* ネットワーク問題 ❌
+* ポート問題 ❌
+* systemd 問題 ❌
+* Flask / OpenCV 問題 ❌
+  👉 **USBカメラ問題 ⭕（原因確定）**
+
+---
+
+## 明日やること（再開手順）
+
+### ① 新しいUSBカメラ（Logicool）を camera001 に接続
+
+（C270 / C310 / C920 など UVC対応品）
+
+### ② 認識確認
+
+```bash
+lsusb
+v4l2-ctl --list-devices
+```
+
+→ **Logicool が表示されること**
+
+### ③ サービス再起動
+
+```bash
+sudo systemctl restart camera_server
+sudo systemctl status camera_server --no-pager
+```
+
+### ④ Pi ローカル確認
+
+```bash
+curl http://127.0.0.1:5001/info
+curl http://127.0.0.1:5001/stream
+```
+
+### ⑤ PC から確認
+
+```powershell
+curl http://192.168.10.106:5001/stream
+```
+
+---
+
+## 次のフェーズ（予定）
+
+* PC側 `test_mjpeg.py` 作成
+* YOLO 前段の 1フレーム取得
+* systemd unit テンプレ化
+* 4台展開ルール整理
+
+---
+
+## 電源断について（記録）
+
+* `systemctl status camera_server` 確認後
+* **シャットダウンせず、給電ケーブルを抜いて停止**
+* 現時点で **データ破損リスクは低い**
+
+---
+
+## ひとことで
+
+> **camera002 は完成。
+> camera001 は「カメラが悪かった」だけ。
+> 明日は Logicool を挿すだけで前に進めます。**
+
+明日再開したら、
+**「Logicool を挿しました。lsusb の結果です」**
+からでOKです。
