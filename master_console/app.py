@@ -23,6 +23,14 @@ app.config['SECRET_KEY'] = 'your-secret-key-here'
 # Python 3.13対応: eventletの代わりにthreadingモードを使用
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
+@app.after_request
+def add_no_cache_headers(response):
+    """ブラウザキャッシュを防ぐ（Safari等の強いキャッシュ対策）"""
+    response.headers.setdefault('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+    response.headers.setdefault('Pragma', 'no-cache')
+    response.headers.setdefault('Expires', '0')
+    return response
+
 # YOLOプロセッサの初期化
 yolo_processor = YOLOProcessor(
     model_path=config.YOLO_MODEL_PATH,
