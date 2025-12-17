@@ -66,6 +66,39 @@ python camera_server.py 2 5003  # カメラ2（ポート5003）
 python camera_server.py 3 5004  # カメラ3（ポート5004）
 ```
 
+## 依存関係の補足（母艦 / 子機）
+
+簡単に依存関係を分けて記載します。子機（Raspberry Pi）にはカメラ取り込み用の OpenCV が必要です。母艦はネットワーク検出や SocketIO、YOLO 実行のために追加のパッケージが必要になります。
+
+- 母艦（Windows/Linux） - 推奨インストール
+
+```bash
+python -m venv .venv
+. .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+必須パッケージ（母艦）:
+- `Flask`, `flask-cors`, `numpy`, `requests`, `flask-socketio`
+
+YOLO 実行（母艦で行う場合・オプション）:
+- `ultralytics`（`torch` が必要です。CPU/GPU によってインストール方法が変わるため、環境に応じた公式手順に従ってください）
+
+- 子機（Raspberry Pi） - 推奨インストール
+
+```bash
+# システムパッケージ（Raspbian/Debian 系）
+sudo apt update
+sudo apt install -y ffmpeg v4l-utils libjpeg-dev libatlas-base-dev
+
+# Python パッケージ
+pip install -r requirements_child.txt
+```
+
+注意:
+- `opencv-python` は Pi 環境でホイールが無い場合、`pip install` が失敗することがあります。その場合は `sudo apt install python3-opencv` を試すか、事前ビルド済みの wheel を利用してください。
+- `ultralytics` / `torch` は子機では不要です（YOLO 処理は母艦で実行する設定のため）。
+
 ## 環境変数
 
 ### 親機

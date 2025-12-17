@@ -1,15 +1,39 @@
+# Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+env/
+venv/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and runtime
 *.log
 
-.venv/
-venv/
-env/
+# Data and outputs
+/data/
+data/
+*.sqlite
+*.db
+*.jsonl
+prediction_results.txt
 
-# カメラ検出のログと集計結果
-data/detections.jsonl
-data/detections_minutely.jsonl
+# Large models / binaries (do not commit; provide download instructions)
+yolov8n.pt
+**/yolov8n.pt
 
-# VS Code等のローカル設定
-.DS_Store
-.vscode/
+# Certificates / secrets
+*.pem
+*.key
+config.secret.py
+
+# mac/windows
+ehthumbs.db

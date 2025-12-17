@@ -293,7 +293,7 @@ def camera_capture_loop(camera_device_id=0):
     # カメラ設定
     camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    camera.set(cv2.CAP_PROP_FPS, 30)
+    camera.set(cv2.CAP_PROP_FPS, 8)
     # 初期の露出設定を適用（可能な範囲で）
     _apply_controls_to_camera()
     
@@ -325,7 +325,7 @@ def camera_capture_loop(camera_device_id=0):
                     if frame_count % 300 == 0:  # 300フレームごとにログ出力（約10秒）
                         print(f"[カメラサーバー] {frame_count}フレームを生成しました")
             
-            time.sleep(0.033)  # 約30fps
+            time.sleep(0.125)  # 約8fps
     except Exception as e:
         print(f"[カメラサーバー] エラーが発生しました: {e}")
         import traceback
@@ -354,7 +354,7 @@ def generate_frames():
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         
-        time.sleep(0.033)  # 約30fps
+        time.sleep(0.125)  # 約8fps
 
 @app.route('/stream')
 def video_feed():
