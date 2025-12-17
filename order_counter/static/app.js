@@ -572,7 +572,33 @@ window.addEventListener('DOMContentLoaded', () => {
     const streamStatus = document.getElementById('streamStatus');
 
     const apiGet = (path) => fetch(path).then((r) => r.json());
-    const apiPost = (path) => fetch(path, { method: 'POST' }).then((r) => r.json());
+    const apiPost = async (path) => {
+      const res = await fetch(path, { method: 'POST' });
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (err) {
+        data = null;
+      }
+      if (!res.ok || (data && data.ok === false)) {
+        const err = new Error((data && data.message) || `HTTP ${res.status}`);
+        err.detail = data;
+        throw err;
+      }
+      return data;
+    };
+
+    const describeServiceError = (err, fallback) => {
+      if (!err) return fallback;
+      const lines = [];
+      if (err.message) lines.push(err.message);
+      const tail = err.detail && err.detail.log_tail;
+      if (Array.isArray(tail) && tail.length) {
+        const snippet = tail.slice(-5).join('\\n');
+        lines.push(snippet);
+      }
+      return lines.join('\\n') || fallback;
+    };
 
     let cached = null;
 
@@ -593,7 +619,9 @@ window.addEventListener('DOMContentLoaded', () => {
           svcStatus.textContent = `${streamText} / ${masterText}`;
         }
         if (streamStatus) {
-          streamStatus.textContent = `配信状態: ${s.running ? '● LIVE' : '停止中'}（port:${s.port} cam:${s.camera_id}）`;
+          const portLabel = s.camera_port ?? s.port ?? 'N/A';
+          const cameraLabel = s.camera_id ?? 'N/A';
+          streamStatus.textContent = `配信状態: ${s.running ? '● LIVE' : '停止中'}（port:${portLabel} cam:${cameraLabel}）`;
         }
       } catch (e) {
         if (svcStatus) {
@@ -610,6 +638,8 @@ window.addEventListener('DOMContentLoaded', () => {
         streamStart.disabled = true;
         try {
           await apiPost('/api/stream/start');
+        } catch (err) {
+          alert(`配信の起動に失敗しました:\\n${describeServiceError(err, 'ログを確認してください。')}`);
         } finally {
           streamStart.disabled = false;
           refreshSvc();
@@ -634,6 +664,8 @@ window.addEventListener('DOMContentLoaded', () => {
         masterStart.disabled = true;
         try {
           await apiPost('/api/master/start');
+        } catch (err) {
+          alert(`母艦コンソールの起動に失敗しました:\\n${describeServiceError(err, 'ログを確認してください。')}`);
         } finally {
           masterStart.disabled = false;
           refreshSvc();

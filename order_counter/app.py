@@ -1,5 +1,5 @@
 from flask import Flask, jsonify, request
-import json, os, signal, subprocess, pathlib, threading, unicodedata
+import json, os, signal, subprocess, pathlib, threading, unicodedata, time
 from datetime import datetime
 from typing import Optional
 
@@ -82,10 +82,27 @@ def _read_pid(pid_file: str):
         return None
 
 
-def _start(cmd, pid_file: str, env: dict | None = None):
+def _service_log_path(name: str | None) -> Optional[pathlib.Path]:
+    if not name:
+        return None
+    log_dir = ROOT / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in name)
+    return log_dir / f"{safe}.log"
+
+
+def _tail_log(path: pathlib.Path | None, lines: int = 40) -> list[str]:
+    if not path or not path.exists():
+        return []
+    with path.open("r", encoding="utf-8", errors="ignore") as handle:
+        data = handle.readlines()
+    return [line.rstrip("\n") for line in data[-lines:]]
+
+
+def _start(cmd, pid_file: str, env: dict | None = None, *, log_name: str | None = None):
     pid = _read_pid(pid_file)
     if pid and _is_running(pid):
-        return pid, "already running"
+        return pid, "already running", []
     if pid and not _is_running(pid):
         try:
             os.remove(pid_file)
@@ -96,10 +113,36 @@ def _start(cmd, pid_file: str, env: dict | None = None):
     if env:
         merged_env.update(env)
 
-    proc = subprocess.Popen(cmd, start_new_session=True, env=merged_env)
+    log_path = _service_log_path(log_name)
+    log_handle = None
+    if log_path:
+        log_handle = open(log_path, "a", encoding="utf-8")
+        log_handle.write(f"\n[{datetime.now().isoformat()}] ==== start {cmd} ====\n")
+        log_handle.flush()
+    proc = subprocess.Popen(
+        cmd,
+        start_new_session=True,
+        env=merged_env,
+        stdout=log_handle if log_handle else None,
+        stderr=subprocess.STDOUT if log_handle else None,
+    )
+    if log_handle:
+        log_handle.flush()
+        log_handle.close()
+
+    time.sleep(1.0)
+    if proc.poll() is not None:
+        if os.path.exists(pid_file):
+            try:
+                os.remove(pid_file)
+            except Exception:
+                pass
+        log_tail = _tail_log(log_path)
+        return None, f"failed (exit {proc.returncode}). log_path={log_path}", log_tail
+
     with open(pid_file, "w") as f:
         f.write(str(proc.pid))
-    return proc.pid, "started"
+    return proc.pid, "started", []
 
 
 def _stop(pid_file: str):
@@ -283,7 +326,13 @@ def stream_status():
 
 @app.post("/api/stream/start")
 def stream_start():
-    pid, msg = _start(STREAM_CMD, STREAM_PID)
+    pid, msg, tail = _start(
+        STREAM_CMD,
+        STREAM_PID,
+        log_name=f"stream_{CAMERA_ID}_{CAMERA_PORT}",
+    )
+    if pid is None:
+        return jsonify({"ok": False, "message": msg, "log_tail": tail}), 500
     return jsonify({"ok": True, "pid": pid, "message": msg})
 
 
@@ -312,7 +361,18 @@ def master_start():
         "CAMERA_PORTS": os.environ.get("CAMERA_PORTS", str(CAMERA_PORT)),
         "KNOWN_CHILD_IPS": os.environ.get("KNOWN_CHILD_IPS", "127.0.0.1"),
     }
-    pid, msg = _start(MASTER_CMD, MASTER_PID, env=env)
+    if "YOLO_MODEL_PATH" not in os.environ:
+        local_model = ROOT / "yolov8n.pt"
+        if local_model.exists():
+            env["YOLO_MODEL_PATH"] = str(local_model)
+    pid, msg, tail = _start(
+        MASTER_CMD,
+        MASTER_PID,
+        env=env,
+        log_name=f"master_{MASTER_PORT}",
+    )
+    if pid is None:
+        return jsonify({"ok": False, "message": msg, "log_tail": tail}), 500
     return jsonify({"ok": True, "pid": pid, "message": msg})
 
 

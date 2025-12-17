@@ -318,7 +318,7 @@
         
         <div class="merged-view">
             <div class="merged-title">📊 統合フレーム (YOLO処理用)</div>
-            <img src="/merged_feed" class="merged-feed" alt="Merged Feed">
+            <img id="merged-feed" src="/merged_feed" class="merged-feed" alt="Merged Feed">
         </div>
         
         <div class="controls">
@@ -335,6 +335,10 @@
     <script>
         const socket = io();
         const cameraPorts = [5000, 5001, 5002, 5003];
+        const MERGED_FEED_URL = '/merged_feed';
+        let mergedFeedAvailable = false;
+        let mergedFeedRetryTimer = null;
+        let mergedFeedHadError = false;
 
         function setText(id, text) {
             const el = document.getElementById(id);
@@ -390,6 +394,42 @@
             logArea.appendChild(logEntry);
             logArea.scrollTop = logArea.scrollHeight;
         }
+
+        function restartMergedFeed(message = '', type = 'info') {
+            const mergedFeed = document.getElementById('merged-feed');
+            if (!mergedFeed) return;
+            if (mergedFeedRetryTimer) {
+                clearTimeout(mergedFeedRetryTimer);
+                mergedFeedRetryTimer = null;
+            }
+            const newSrc = `${MERGED_FEED_URL}?t=${Date.now()}`;
+            mergedFeed.src = newSrc;
+            mergedFeedHadError = false;
+            if (message) addLog(message, type);
+        }
+
+        function scheduleMergedFeedRetry() {
+            if (mergedFeedRetryTimer) return;
+            mergedFeedRetryTimer = setTimeout(() => {
+                mergedFeedRetryTimer = null;
+                restartMergedFeed('統合フレーム: ストリームを再接続します');
+            }, 2000);
+        }
+
+        function setupMergedFeedHandlers() {
+            const mergedFeed = document.getElementById('merged-feed');
+            if (!mergedFeed) return;
+            mergedFeed.addEventListener('error', () => {
+                if (!mergedFeedHadError) {
+                    addLog('統合フレーム: ストリーム読み込みに失敗しました', 'error');
+                    mergedFeedHadError = true;
+                }
+                scheduleMergedFeedRetry();
+            });
+            mergedFeed.addEventListener('load', () => {
+                mergedFeedHadError = false;
+            });
+        }
         
         // Socket.IOイベントハンドラ
         socket.on('connect', () => {
@@ -397,6 +437,7 @@
             document.getElementById('connection-status').classList.remove('disconnected');
             document.getElementById('connection-text').textContent = '接続中';
             addLog('サーバーに接続しました', 'success');
+            restartMergedFeed();
             refreshStatus();
         });
         
@@ -405,6 +446,8 @@
             document.getElementById('connection-status').classList.add('disconnected');
             document.getElementById('connection-text').textContent = '切断';
             addLog('サーバーから切断されました', 'error');
+            mergedFeedAvailable = false;
+            scheduleMergedFeedRetry();
         });
         
         socket.on('connected', (data) => {
@@ -488,10 +531,18 @@
                 document.getElementById('merged-status').classList.add('connected');
                 document.getElementById('merged-status').classList.remove('disconnected');
                 document.getElementById('merged-text').textContent = '利用可能';
+                if (!mergedFeedAvailable) {
+                    restartMergedFeed('統合フレーム: 利用可能になりました');
+                }
+                mergedFeedAvailable = true;
             } else {
                 document.getElementById('merged-status').classList.remove('connected');
                 document.getElementById('merged-status').classList.add('disconnected');
                 document.getElementById('merged-text').textContent = '未利用';
+                if (mergedFeedAvailable) {
+                    addLog('統合フレーム: 現在利用できません', 'info');
+                }
+                mergedFeedAvailable = false;
             }
             
             // 各カメラの詳細な状態を更新
@@ -569,6 +620,8 @@
             addLog('「接続を更新」ボタンを押してカメラを検出してください', 'info');
             addLog('露出調整: AEをOFFにすると「露出」スライダーが有効になります（値はカメラ依存 / v4l2 exposure_time_absolute想定）', 'info');
             for (let i = 0; i < 4; i++) setupCameraControlUi(i);
+            setupMergedFeedHandlers();
+            restartMergedFeed('統合フレーム: ストリームを初期化します');
         });
     </script>
 </body>
