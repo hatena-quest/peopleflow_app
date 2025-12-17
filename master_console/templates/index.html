@@ -336,6 +336,11 @@
         const socket = io();
         const cameraPorts = [5000, 5001, 5002, 5003];
         const MERGED_FEED_URL = '/merged_feed';
+        const CAMERA_COUNT = 4;
+        const cameraFeedStates = Array.from({ length: CAMERA_COUNT }, () => ({
+            retryTimer: null,
+            hadError: false,
+        }));
         let mergedFeedAvailable = false;
         let mergedFeedRetryTimer = null;
         let mergedFeedHadError = false;
@@ -343,6 +348,45 @@
         function setText(id, text) {
             const el = document.getElementById(id);
             if (el) el.textContent = text;
+        }
+
+        function restartCameraFeed(cameraId, message = '', type = 'info') {
+            const cameraFeed = document.querySelector(`#camera-${cameraId} img.camera-feed`);
+            const state = cameraFeedStates[cameraId];
+            if (!cameraFeed || !state) return;
+            if (state.retryTimer) {
+                clearTimeout(state.retryTimer);
+                state.retryTimer = null;
+            }
+            const timestamp = Date.now();
+            cameraFeed.src = `/video_feed/${cameraId}?t=${timestamp}`;
+            state.hadError = false;
+            if (message) addLog(message, type);
+        }
+
+        function scheduleCameraFeedRetry(cameraId) {
+            const state = cameraFeedStates[cameraId];
+            if (!state || state.retryTimer) return;
+            state.retryTimer = setTimeout(() => {
+                state.retryTimer = null;
+                restartCameraFeed(cameraId, `カメラ ${cameraId + 1}: ストリームを再接続します`);
+            }, 2000);
+        }
+
+        function setupCameraFeedHandlers(cameraId) {
+            const cameraFeed = document.querySelector(`#camera-${cameraId} img.camera-feed`);
+            const state = cameraFeedStates[cameraId];
+            if (!cameraFeed || !state) return;
+            cameraFeed.addEventListener('error', () => {
+                if (!state.hadError) {
+                    addLog(`カメラ ${cameraId + 1}: ストリーム読み込みに失敗しました`, 'error');
+                    state.hadError = true;
+                }
+                scheduleCameraFeedRetry(cameraId);
+            });
+            cameraFeed.addEventListener('load', () => {
+                state.hadError = false;
+            });
         }
 
         function updateCameraControlUi(cameraId) {
@@ -448,6 +492,9 @@
             addLog('サーバーから切断されました', 'error');
             mergedFeedAvailable = false;
             scheduleMergedFeedRetry();
+            for (let i = 0; i < CAMERA_COUNT; i++) {
+                scheduleCameraFeedRetry(i);
+            }
         });
         
         socket.on('connected', (data) => {
@@ -466,9 +513,7 @@
             
             // ストリーミングを即座に開始（キャッシュを回避するためにタイムスタンプを追加）
             if (cameraFeed) {
-                const timestamp = new Date().getTime();
-                cameraFeed.src = `/video_feed/${cameraId}?t=${timestamp}`;
-                addLog(`カメラ ${cameraId + 1}: ストリーミングを開始しました`, 'success');
+                restartCameraFeed(cameraId, `カメラ ${cameraId + 1}: ストリーミングを開始しました`, 'success');
             }
 
             // 子機の現在設定を取得してUIに反映
@@ -549,7 +594,7 @@
             let connectedCount = 0;
             let statusDetails = [];
             
-            for (let i = 0; i < 4; i++) {
+            for (let i = 0; i < CAMERA_COUNT; i++) {
                 const cameraStatus = data.cameras[i];
                 if (!cameraStatus) continue;
                 
@@ -577,7 +622,7 @@
             
             // ログに詳細情報を表示
             addLog(`=== ステータス更新 (${new Date().toLocaleTimeString()}) ===`, 'info');
-            addLog(`接続中のカメラ: ${connectedCount}/4台`, connectedCount > 0 ? 'success' : 'info');
+            addLog(`接続中のカメラ: ${connectedCount}/${CAMERA_COUNT}台`, connectedCount > 0 ? 'success' : 'info');
             addLog(`統合フレーム: ${data.merged_frame_available ? '利用可能' : '未利用'}`, 
                    data.merged_frame_available ? 'success' : 'info');
             statusDetails.forEach(detail => {
@@ -597,7 +642,7 @@
         }
         
         function stopAllCameras() {
-            for (let i = 0; i < 4; i++) {
+            for (let i = 0; i < CAMERA_COUNT; i++) {
                 socket.emit('stop_camera', { camera_id: i });
             }
             addLog('全カメラの停止をリクエストしました', 'info');
@@ -619,7 +664,11 @@
             addLog('ページを読み込みました', 'info');
             addLog('「接続を更新」ボタンを押してカメラを検出してください', 'info');
             addLog('露出調整: AEをOFFにすると「露出」スライダーが有効になります（値はカメラ依存 / v4l2 exposure_time_absolute想定）', 'info');
-            for (let i = 0; i < 4; i++) setupCameraControlUi(i);
+            for (let i = 0; i < CAMERA_COUNT; i++) {
+                setupCameraControlUi(i);
+                setupCameraFeedHandlers(i);
+                restartCameraFeed(i);
+            }
             setupMergedFeedHandlers();
             restartMergedFeed('統合フレーム: ストリームを初期化します');
         });
