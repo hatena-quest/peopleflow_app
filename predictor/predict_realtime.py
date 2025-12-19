@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -325,6 +326,42 @@ def describe_influences(model: Dict, features: Dict[str, int]) -> List[Dict]:
         )
     influences.sort(key=lambda item: abs(item["contribution"]), reverse=True)
     return influences
+
+
+def _feature_labels(feature_name: str) -> Tuple[str, str]:
+    """
+    Convert a feature name like 'cam1_left' into UI-friendly camera/direction labels.
+    """
+    match = re.match(r"cam(\d+)_(left|right)$", feature_name or "")
+    if not match:
+        safe_name = feature_name.strip() if feature_name else "feature"
+        return safe_name, ""
+
+    camera_id, direction = match.groups()
+    camera_label = f"カメラ{camera_id}"
+    direction_label = "左方向" if direction == "left" else "右方向"
+    return camera_label, direction_label
+
+
+def influences_to_reasons(influences: List[Dict]) -> List[Dict]:
+    """
+    Build the frontend-friendly "reasons" payload from coefficient contributions.
+    """
+    reasons: List[Dict] = []
+    for item in influences:
+        feature_name = str(item.get("feature", "") or "")
+        camera_label, direction_label = _feature_labels(feature_name)
+        impact_value = float(item.get("contribution", 0.0))
+        count_value = float(item.get("value", 0.0))
+        reasons.append(
+            {
+                "camera": camera_label,
+                "direction": direction_label,
+                "impact": impact_value,
+                "count": count_value,
+            }
+        )
+    return reasons
 
 
 def compute_busy_level(prediction: float) -> Dict[str, str]:

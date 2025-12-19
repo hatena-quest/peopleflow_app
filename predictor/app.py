@@ -9,6 +9,7 @@ from dummy import DummyDataGenerator
 from predict_realtime import (
     compute_busy_level,
     describe_influences,
+    influences_to_reasons,
     load_latest_features,
     load_model,
     load_prediction_results_text,
@@ -53,6 +54,7 @@ def api_predict():
         "busy_level": busy_level,
         "features": features,
         "influences": influences,
+        "reasons": influences_to_reasons(influences),
         "model": {
             "r2": model.get("r2"),
             "rmse": model.get("rmse"),
